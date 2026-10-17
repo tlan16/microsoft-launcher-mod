@@ -56,6 +56,7 @@ ENTRYPOINT ["bash"]
 FROM ubuntu:latest AS ghidra
 
 ARG GITHUB_TOKEN
+
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV DEBIAN_FRONTEND=noninteractive
@@ -95,6 +96,7 @@ RUN sed -i "1i plugins { id 'org.gradle.toolchains.foojay-resolver-convention' v
 RUN --mount=type=cache,id=ghidra-gradle,target=/root/.gradle,sharing=locked \
     --mount=type=cache,id=ghidra-dependencies,target=/app/dependencies,sharing=locked \
     ./gradlew --no-daemon --build-cache --no-configuration-cache --parallel --max-workers="$(nproc)" -I gradle/support/fetchDependencies.gradle
+
 RUN --mount=type=cache,id=ghidra-gradle,target=/root/.gradle,sharing=locked \
     --mount=type=cache,id=ghidra-dependencies,target=/app/dependencies,sharing=locked \
     ./gradlew --no-daemon --build-cache --no-configuration-cache --parallel --max-workers="$(nproc)" buildGhidra --stacktrace --info
@@ -112,6 +114,55 @@ RUN set -eux; \
     mv "$1" /opt/ghidra; \
     rmdir /tmp/ghidra-dist; \
     test -x /opt/ghidra/support/analyzeHeadless
+
+ENTRYPOINT ["bash"]
+
+FROM ubuntu:latest AS apktool
+
+ARG APKTOOL_VERSION=3.0.3
+
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install OS dependencies.
+# The repository includes the Gradle wrapper; no system Gradle is needed.
+# Gradle 8.14.x cannot run on Java 25; use Java 21 for this stage.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        openjdk-21-jdk-headless \
+        git ca-certificates \
+        bash && \
+    ln -s "$(dirname "$(dirname "$(readlink -f /usr/bin/javac)")")" /opt/java && \
+    rm -rf /var/lib/apt/lists/*
+ENV JAVA_HOME=/opt/java
+ENV PATH="$JAVA_HOME/bin:$PATH"
+
+# Get source code of Apktool.
+# This public repository does not require a GitHub token.
+WORKDIR /app
+RUN git clone \
+    --branch "v${APKTOOL_VERSION}" \
+    --depth 1 \
+    --single-branch \
+    https://github.com/iBotPeaches/Apktool.git .
+
+# Build and test Apktool, producing the standalone JAR without R8.
+RUN --mount=type=cache,id=apktool-gradle,target=/root/.gradle,sharing=locked \
+    ./gradlew --no-daemon --build-cache --no-configuration-cache \
+        --parallel --max-workers="$(nproc)" \
+        build shadowJar
+
+# Install the built JAR and official Linux wrapper together.
+RUN set -eux; \
+    test -s /app/brut.apktool/apktool-cli/build/libs/apktool-cli.jar; \
+    install -m 0755 \
+        /app/brut.apktool/apktool-cli/build/libs/apktool-cli.jar \
+        /usr/local/bin/apktool.jar; \
+    install -m 0755 \
+        /app/scripts/linux/apktool \
+        /usr/local/bin/apktool; \
+    apktool --version
 
 ENTRYPOINT ["bash"]
 
@@ -140,7 +191,7 @@ RUN apt-get update && \
         default-jdk-headless \
         nodejs npm \
         python3 python3-pip python3-venv python3-dev \
-        jq \
+        jq yq \
         bash \
         ca-certificates && \
     ln -s "$(dirname "$(dirname "$(readlink -f /usr/bin/javac)")")" /opt/java && \
@@ -161,6 +212,11 @@ ENV REA_JADX_MCP_JAR=/opt/jadx/jadx-headless-mcp.jar
 # Install rea dependency - ghidra
 COPY --from=ghidra /opt/ghidra /opt/ghidra
 ENV GHIDRA_INSTALL_DIR=/opt/ghidra
+
+# Install rea dependency - apktool
+COPY --from=apktool /usr/local/bin/apktool.jar /usr/local/bin/apktool.jar
+COPY --from=apktool /usr/local/bin/apktool /usr/local/bin/apktool
+RUN apktool --version
 
 # Install rea dependency - IDA
 ## Not possible now due to no free tier that support local binary installation

@@ -8,6 +8,8 @@ services:
       context: .
       args:
         - GITHUB_TOKEN=${GITHUB_TOKEN}
+    environment:
+      COPILOT_HOME: /app/out/copilot
     volumes:
       - ./out/:/app/out/
   ghidra:
