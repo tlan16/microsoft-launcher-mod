@@ -7,6 +7,16 @@ services:
     build:
       context: .
       args:
-        - COPILOT_GITHUB_TOKEN=${COPILOT_GITHUB_TOKEN}
+        - GITHUB_TOKEN=${GITHUB_TOKEN}
     volumes:
       - ./out/:/app/out/
+  ghidra:
+    extends:
+      service: app
+    build:
+      target: ghidra
+  jadx:
+    extends:
+      service: app
+    build:
+      target: jadx
