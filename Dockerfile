@@ -124,6 +124,11 @@ ENV GITHUB_TOKEN=${GITHUB_TOKEN}
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV DEBIAN_FRONTEND=noninteractive
+ENV REA_JADX_HEAP_MIB=8192
+ENV REA_JADX_ACTIVE_PROCESSOR_COUNT=4
+ENV JAVA_TOOL_OPTIONS=-Xmx8g
+ENV REA_JADX_OPERATION_TIMEOUT_MS=600000
+ENV COPILOT_ALLOW_ALL=true
 
 # Use HTTP for APT repositories for better local caching
 RUN find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) \
@@ -135,6 +140,7 @@ RUN apt-get update && \
         default-jdk-headless \
         nodejs npm \
         python3 python3-pip python3-venv python3-dev \
+        jq \
         bash \
         ca-certificates && \
     ln -s "$(dirname "$(dirname "$(readlink -f /usr/bin/javac)")")" /opt/java && \
@@ -146,7 +152,7 @@ ENV PATH="$JAVA_HOME/bin:$PATH"
 RUN npm install -g @github/copilot && \
     npm cache clean --force && \
     copilot --version
-# Manual test with: copilot -p "Reply with only OK. Do not use tools." -s
+# Manual test with: copilot -p "Reply with only OK. Do not use tools." -s --context long_context
 
 # Install rea dependency - jadx
 COPY --from=jadx /opt/jadx/jadx-headless-mcp.jar /opt/jadx/jadx-headless-mcp.jar
@@ -172,3 +178,5 @@ WORKDIR /app
 COPY ["original/com.microsoft.launcher_6.260402.0.1178950-1178950_minAPI24(arm64-v8a,armeabi-v7a)(nodpi)_apkmirror.com.apk", "/app/original/com.microsoft.launcher_6.260402.0.1178950-1178950_minAPI24(arm64-v8a,armeabi-v7a)(nodpi)_apkmirror.com.apk"]
 
 ENTRYPOINT ["bash"]
+
+# rea inspect-android-package original/com.microsoft.launcher_6.260402.0.1178950-1178950_minAPI24\(arm64-v8a\,armeabi-v7a\)\(nodpi\)_apkmirror.com.apk
