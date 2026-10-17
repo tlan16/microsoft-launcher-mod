@@ -1,0 +1,12 @@
+---
+name: microsoft-launcher-mod
+services:
+  app:
+    # Use amd64 because Hopper is not yet supported on arm64
+    platform: linux/amd64
+    build:
+      context: .
+      args:
+        - COPILOT_GITHUB_TOKEN=${COPILOT_GITHUB_TOKEN}
+    volumes:
+      - ./out/:/app/out/

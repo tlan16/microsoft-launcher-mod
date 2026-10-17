@@ -1,0 +1,7 @@
+/.env
+.idea/
+
+# Docker ignore specific
+/Dockerfile
+/docker-compose.yaml
+/.gitignore
