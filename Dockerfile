@@ -1,34 +1,24 @@
 # syntax=docker/dockerfile:1
 FROM ubuntu:latest AS jadx
 
-# Install JAVA, gradle and set JAVA_HOME
+ARG GITHUB_TOKEN
+
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV DEBIAN_FRONTEND=noninteractive
+ENV GH_TOKEN=${GITHUB_TOKEN}
+
+# Install OS dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        default-jdk-headless && \
+        default-jdk-headless \
+        gh git ca-certificates \
+        bash \
+        sed && \
     ln -s "$(dirname "$(dirname "$(readlink -f /usr/bin/javac)")")" /opt/java && \
     rm -rf /var/lib/apt/lists/*
 ENV JAVA_HOME=/opt/java
 ENV PATH="$JAVA_HOME/bin:$PATH"
-
-# Install git
-ARG GITHUB_TOKEN
-ENV GH_TOKEN=${GITHUB_TOKEN}
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        gh git ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install bash
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        bash && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install sed
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        sed && \
-    rm -rf /var/lib/apt/lists/*
 
 # Get source code of jadx
 WORKDIR /app
@@ -45,52 +35,46 @@ RUN gh repo clone https://github.com/1013503897/jadx-headless-mcp . -- \
 RUN sed -i '1i plugins { id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0" }' settings.gradle.kts
 
 # Build jadx
-RUN --mount=type=cache,id=jadx-gradle,target=/root/.gradle,sharing=locked ./gradlew --no-daemon installDist
+RUN --mount=type=cache,id=jadx-gradle,target=/root/.gradle,sharing=locked \
+    ./gradlew --no-daemon --build-cache --configuration-cache --parallel --max-workers="$(nproc)" shadowJar
+
+RUN set -eux; \
+    set -- /app/build/libs/jadx-headless-mcp*-all.jar; \
+    [ "$#" -eq 1 ]; \
+    [ -f "$1" ]; \
+    mkdir -p /opt/jadx; \
+    mv "$1" /opt/jadx/jadx-headless-mcp.jar; \
+    test -s /opt/jadx/jadx-headless-mcp.jar; \
+    jar tf /opt/jadx/jadx-headless-mcp.jar > /tmp/jadx-jar-entries; \
+    for entry in jadx/api/JadxDecompiler.class com/google/gson/Gson.class io/modelcontextprotocol/kotlin/sdk/server/Server.class; do \
+        grep -Fx "$entry" /tmp/jadx-jar-entries; \
+    done; \
+    rm /tmp/jadx-jar-entries
 
 ENTRYPOINT ["bash"]
 
 FROM ubuntu:latest AS ghidra
 
-# Install JAVA, gradle and set JAVA_HOME
+ARG GITHUB_TOKEN
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV DEBIAN_FRONTEND=noninteractive
+ENV GH_TOKEN=${GITHUB_TOKEN}
+
+# Install OS dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        default-jdk-headless && \
+        default-jdk-headless \
+        python3 python3-pip python3-venv python3-dev \
+        build-essential \
+        gh git ca-certificates \
+        sed \
+        bash \
+        unzip && \
     ln -s "$(dirname "$(dirname "$(readlink -f /usr/bin/javac)")")" /opt/java && \
     rm -rf /var/lib/apt/lists/*
 ENV JAVA_HOME=/opt/java
 ENV PATH="$JAVA_HOME/bin:$PATH"
-
-# Install python
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv python3-dev && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install build-essential for compiling native code
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        build-essential && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install git
-ARG GITHUB_TOKEN
-ENV GH_TOKEN=${GITHUB_TOKEN}
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        gh git ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install sed
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        sed && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install bash
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        bash && \
-    rm -rf /var/lib/apt/lists/*
 
 # Get source code of Ghidra
 WORKDIR /app
@@ -107,64 +91,70 @@ RUN gh repo clone https://github.com/NationalSecurityAgency/ghidra.git . -- \
 RUN sed -i "1i plugins { id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0' }" settings.gradle
 
 # Build Ghidra
-RUN --mount=type=cache,id=ghidra-gradle,target=/root/.gradle,sharing=locked ./gradlew --no-daemon -I gradle/support/fetchDependencies.gradle
+# Ghidra tasks capture Project objects, which the configuration cache cannot serialize.
 RUN --mount=type=cache,id=ghidra-gradle,target=/root/.gradle,sharing=locked \
-    ./gradlew --no-daemon buildGhidra --stacktrace --info
+    --mount=type=cache,id=ghidra-dependencies,target=/app/dependencies,sharing=locked \
+    ./gradlew --no-daemon --build-cache --no-configuration-cache --parallel --max-workers="$(nproc)" -I gradle/support/fetchDependencies.gradle
+RUN --mount=type=cache,id=ghidra-gradle,target=/root/.gradle,sharing=locked \
+    --mount=type=cache,id=ghidra-dependencies,target=/app/dependencies,sharing=locked \
+    ./gradlew --no-daemon --build-cache --no-configuration-cache --parallel --max-workers="$(nproc)" buildGhidra --stacktrace --info
+
+# Extract the built distribution into a stable directory.
+RUN set -eux; \
+    set -- /app/build/dist/ghidra_*.zip; \
+    [ "$#" -eq 1 ]; \
+    [ -f "$1" ]; \
+    mkdir -p /tmp/ghidra-dist /opt; \
+    unzip -q "$1" -d /tmp/ghidra-dist; \
+    set -- /tmp/ghidra-dist/ghidra_*; \
+    [ "$#" -eq 1 ]; \
+    [ -d "$1" ]; \
+    mv "$1" /opt/ghidra; \
+    rmdir /tmp/ghidra-dist; \
+    test -x /opt/ghidra/support/analyzeHeadless
 
 ENTRYPOINT ["bash"]
 
 FROM ubuntu:latest
 
+ARG GITHUB_TOKEN
+
+ENV COPILOT_GITHUB_TOKEN=${GITHUB_TOKEN}
+ENV GITHUB_TOKEN=${GITHUB_TOKEN}
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Use HTTP for APT repositories for better local caching
 RUN find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) \
     -exec sed -i 's|https://|http://|g' {} +
 
-# Install JAVA and set JAVA_HOME
+# Install OS dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        default-jdk-headless && \
+        default-jdk-headless \
+        nodejs npm \
+        python3 python3-pip python3-venv python3-dev \
+        bash \
+        ca-certificates && \
     ln -s "$(dirname "$(dirname "$(readlink -f /usr/bin/javac)")")" /opt/java && \
     rm -rf /var/lib/apt/lists/*
 ENV JAVA_HOME=/opt/java
 ENV PATH="$JAVA_HOME/bin:$PATH"
 
-# Install node and npm
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        nodejs npm && \
-    ln -s "$(dirname "$(dirname "$(readlink -f /usr/bin/javac)")")" /opt/java && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install python
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv python3-dev && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install bash
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        bash && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install github copilot CLI
-ARG GITHUB_TOKEN
-ENV COPILOT_GITHUB_TOKEN=${GITHUB_TOKEN}
-ENV GITHUB_TOKEN=${GITHUB_TOKEN}
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+# Install rea dependency - github copilot CLI
 RUN npm install -g @github/copilot && \
     npm cache clean --force && \
     copilot --version
 # Manual test with: copilot -p "Reply with only OK. Do not use tools." -s
 
 # Install rea dependency - jadx
-COPY --from=jadx /app/build/libs/jadx-headless-mcp-0.7.1-all.jar /app/jadx-headless-mcp-0.7.1-all.jar
-ENV REA_JADX_MCP_JAR=/app/jadx-headless-mcp-0.7.1-all.jar
+COPY --from=jadx /opt/jadx/jadx-headless-mcp.jar /opt/jadx/jadx-headless-mcp.jar
+ENV REA_JADX_MCP_JAR=/opt/jadx/jadx-headless-mcp.jar
+
+# Install rea dependency - ghidra
+COPY --from=ghidra /opt/ghidra /opt/ghidra
+ENV GHIDRA_INSTALL_DIR=/opt/ghidra
 
 # Install rea dependency - IDA
 ## Not possible now due to no free tier that support local binary installation
@@ -173,7 +163,9 @@ ENV REA_JADX_MCP_JAR=/app/jadx-headless-mcp-0.7.1-all.jar
 RUN npm install -g rea-agents && \
     npm cache clean --force && \
     rea-agents --version
-#RUN rea setup --full-output --yes --client copilot_cli --skill=true --install-hopper
+RUN apt-get update && \
+    rea setup --full-output --yes --client copilot_cli --skill=true --install-hopper && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
