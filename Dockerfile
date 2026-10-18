@@ -1,4 +1,56 @@
 # syntax=docker/dockerfile:1
+FROM ubuntu:latest AS android-sdk
+
+ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
+ARG ANDROID_API=35
+ARG ANDROID_BUILD_TOOLS_VERSION=35.0.0
+
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV DEBIAN_FRONTEND=noninteractive
+ENV ANDROID_HOME=/opt/android-sdk
+
+# Google's Linux SDK native tools require an amd64 container.
+RUN test "$(dpkg --print-architecture)" = amd64
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        openjdk-21-jdk-headless \
+        ca-certificates curl unzip bash && \
+    ln -s "$(dirname "$(dirname "$(readlink -f /usr/bin/javac)")")" /opt/java && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV JAVA_HOME=/opt/java
+ENV PATH="${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${JAVA_HOME}/bin:${PATH}"
+
+# Install a pinned command-line tools archive.
+RUN set -eux; \
+    mkdir -p "${ANDROID_HOME}/cmdline-tools"; \
+    curl -fsSL --retry 3 \
+        "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
+        -o /tmp/android-tools.zip; \
+    unzip -q /tmp/android-tools.zip -d /tmp/android-tools; \
+    mv /tmp/android-tools/cmdline-tools \
+        "${ANDROID_HOME}/cmdline-tools/latest"; \
+    rm -rf /tmp/android-tools /tmp/android-tools.zip
+
+# Automatically accept SDK licenses.
+# With Docker's default /bin/sh, the pipeline returns sdkmanager's status.
+RUN yes | sdkmanager --sdk_root="${ANDROID_HOME}" --licenses > /dev/null
+
+RUN set -eux; \
+    sdkmanager --sdk_root="${ANDROID_HOME}" \
+        "platform-tools" \
+        "platforms;android-${ANDROID_API}" \
+        "build-tools;${ANDROID_BUILD_TOOLS_VERSION}"; \
+    ln -s "build-tools/${ANDROID_BUILD_TOOLS_VERSION}" \
+        "${ANDROID_HOME}/build-tools-bin"; \
+    test -s "${ANDROID_HOME}/platforms/android-${ANDROID_API}/android.jar"; \
+    "${ANDROID_HOME}/platform-tools/adb" --version; \
+    "${ANDROID_HOME}/build-tools-bin/aapt2" version; \
+    "${ANDROID_HOME}/build-tools-bin/apksigner" version
+
+
 FROM ubuntu:latest AS jadx
 
 ARG GITHUB_TOKEN
@@ -192,8 +244,10 @@ RUN apt-get update && \
         nodejs npm \
         python3 python3-pip python3-venv python3-dev \
         jq yq \
-        bash \
-        ca-certificates && \
+        gh git ca-certificates \
+        curl wget \
+        unzip zip \
+        bash && \
     ln -s "$(dirname "$(dirname "$(readlink -f /usr/bin/javac)")")" /opt/java && \
     rm -rf /var/lib/apt/lists/*
 ENV JAVA_HOME=/opt/java
@@ -217,6 +271,12 @@ ENV GHIDRA_INSTALL_DIR=/opt/ghidra
 COPY --from=apktool /usr/local/bin/apktool.jar /usr/local/bin/apktool.jar
 COPY --from=apktool /usr/local/bin/apktool /usr/local/bin/apktool
 RUN apktool --version
+
+# Install rea dependency - Android SDK
+COPY --from=android-sdk /opt/android-sdk /opt/android-sdk
+ENV ANDROID_HOME=/opt/android-sdk
+ENV ANDROID_SDK_ROOT=/opt/android-sdk
+ENV PATH="${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${ANDROID_HOME}/build-tools-bin:${PATH}"
 
 # Install rea dependency - IDA
 ## Not possible now due to no free tier that support local binary installation

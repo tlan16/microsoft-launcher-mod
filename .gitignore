@@ -1,3 +1,5 @@
 /.env
 .idea/
 /out/
+/signing/*
+!/signing/.gitkeep

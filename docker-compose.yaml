@@ -10,8 +10,10 @@ services:
         - GITHUB_TOKEN=${GITHUB_TOKEN}
     environment:
       COPILOT_HOME: /app/out/copilot
+      APK_SIGNING_DIR: /app/signing
     volumes:
       - ./out/:/app/out/
+      - ./signing/:/app/signing/
   ghidra:
     extends:
       service: app
