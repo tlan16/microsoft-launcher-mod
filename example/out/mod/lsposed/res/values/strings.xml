@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="module_description">Suppresses the recurring "Enable Automated Version Update" dialog in Microsoft Launcher 6.260402.0.1178950</string>
+</resources>

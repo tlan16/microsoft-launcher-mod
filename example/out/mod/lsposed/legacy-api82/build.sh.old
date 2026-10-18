@@ -1,0 +1,20 @@
+#!/bin/bash
+# Build the LSPosed module APK. Needs JDK + sdk/ (platforms;android-34, build-tools;34.0.0) + lib/api-82.jar
+set -e
+cd "$(dirname "$0")"
+: "${APK_SIGNING_STORE_PASSWORD:?Set keystore password in environment}"
+: "${APK_SIGNING_KEY_PASSWORD:?Set key password in environment}"
+: "${APK_SIGNING_KEY_ALIAS:?Set signing key alias in environment}"
+export APK_SIGNING_STORE_PASSWORD APK_SIGNING_KEY_PASSWORD
+SIGNING_KEYSTORE=/app/signing/module.keystore
+[ -f "$SIGNING_KEYSTORE" ] || { printf '%s\n' "Provision $SIGNING_KEYSTORE before building" >&2; exit 1; }
+BT=$PWD/sdk/build-tools/34.0.0; AJ=$PWD/sdk/platforms/android-34/android.jar
+rm -rf build out; mkdir -p build/classes build/res out
+javac -source 8 -target 8 -Xlint:-options -cp "$AJ:lib/api-82.jar" -d build/classes src/com/local/noaadprompt/Hook.java
+java -cp lib/r8.jar com.android.tools.r8.D8 --lib "$AJ" --min-api 21 --output build build/classes/com/local/noaadprompt/*.class
+$BT/aapt2 compile --dir res -o build/res.zip
+$BT/aapt2 link -o build/unsigned.apk -I "$AJ" --manifest AndroidManifest.xml --min-sdk-version 21 --target-sdk-version 34 build/res.zip
+(cd build && zip -q unsigned.apk classes.dex && cd .. && cd . && zip -q -r build/unsigned.apk assets)
+$BT/zipalign -f 4 build/unsigned.apk build/aligned.apk
+$BT/apksigner sign --ks "$SIGNING_KEYSTORE" --ks-key-alias "$APK_SIGNING_KEY_ALIAS" --ks-pass env:APK_SIGNING_STORE_PASSWORD --key-pass env:APK_SIGNING_KEY_PASSWORD --out out/NoAadPrompt-lsposed.apk build/aligned.apk
+$BT/apksigner verify --print-certs out/NoAadPrompt-lsposed.apk | head -3

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.local.noaadprompt">
+    <application
+        android:label="MS Launcher: no AAD update prompt"
+        android:description="@string/module_description"
+        android:allowBackup="false" />
+</manifest>
