@@ -10,7 +10,8 @@ ENV LC_ALL=C.UTF-8
 ENV DEBIAN_FRONTEND=noninteractive
 ENV ANDROID_HOME=/opt/android-sdk
 
-# Google's Linux SDK native tools require an amd64 container.
+# Google's prebuilt Linux SDK native tools used here require x86-64 execution.
+# Use linux/amd64, either natively or under emulation.
 RUN test "$(dpkg --print-architecture)" = amd64
 
 RUN apt-get update && \
